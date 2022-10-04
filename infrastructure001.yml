@@ -1,0 +1,199 @@
+Description: A Simple Template
+
+
+Parameters:
+
+  VpcCirdBlock:
+    Type: String
+    Default: 172.31.0.0/16
+    Description: Enter your VPC CidrBlock 
+
+  VpcTagKey:
+    Type: String
+    Default: Key
+    Description: Enter your VPC Tag Key
+
+  VpcTagValue:
+    Type: String
+    Default: Value
+    Description: Enter your VPC Tag Value
+
+  RTTagKey:
+    Type: String
+    Default: Key
+    Description: Enter your Route table Tag Key
+
+  RTTagValue:
+    Type: String
+    Default: Value
+    Description: Enter your Route table Tag Value
+
+  SubnetTagKey:
+    Type: String
+    Default: Key
+    Description: Enter your Subnet Tag Key
+
+  SubnetTagValue:
+    Type: String
+    Default: Value
+    Description: Enter your Subnet Tag Value
+
+  IGTagKey:
+    Type: String
+    Default: Key
+    Description: Enter your InternetGateway Tag Key
+
+  IGTagValue:
+    Type: String
+    Default: Value
+    Description: Enter your InternetGateway Tag Value
+
+  SubnetAZ:
+    Type: String
+    Default: "us-west-2a"
+    Description: Enter your Subnet AZ
+
+  SubnetCirdBlock:
+    Type: String
+    Default: 172.31.0.0/24
+    Description: Enter your Subnet CidrBlock
+
+  EC2ImageId:
+    Type: String
+    Default: ami-08e2d37b6a0129927
+    Description: Enter the image id 
+
+  EC2InstanceType:
+    Type: String
+    Default: t2.micro
+    Description: Enter instance type
+
+  SGTagKey:
+    Type: String
+    Default: Key
+    Description: Enter your SecurityGroup Tag key
+
+  SGTagValue:
+    Type: String
+    Default: Value
+    Description: Enter your SecurityGroup Tag Value
+
+
+Resources:
+
+  VPC001:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 
+        Ref: VpcCirdBlock
+      EnableDnsHostnames: True
+      EnableDnsSupport: True
+      Tags:
+        - Key: 
+            Ref: VpcTagKey
+          Value: 
+            Ref: VpcTagValue 
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: 
+        Ref: VPC001
+      AvailabilityZone:
+        Ref: SubnetAZ
+      CidrBlock:
+        Ref: SubnetCirdBlock
+      MapPublicIpOnLaunch: True
+      Tags:
+        - Key: 
+            Ref: SubnetTagKey
+          Value: 
+            Ref: SubnetTagValue 
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: 
+            Ref: IGTagKey
+          Value: 
+            Ref: IGTagValue 
+
+  GatewayToInternet:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: 
+        Ref: VPC001
+      InternetGatewayId:
+        Ref: InternetGateway
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC001
+      Tags:
+        - Key: 
+            Ref: RTTagKey
+          Value: 
+            Ref: RTTagValue 
+
+  PublicRoute1:   # Public route table has direct routing to IGW:
+    Type: AWS::EC2::Route
+    DependsOn: GatewayToInternet
+    Properties:
+      RouteTableId:
+        Ref: PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: InternetGateway
+
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId:
+        Ref: EC2ImageId
+      AvailabilityZone:
+        Ref: SubnetAZ
+      InstanceType:
+        Ref: EC2InstanceType
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: True
+          DeviceIndex: 0
+          GroupSet:
+            - Ref: SecurityGroup
+          SubnetId: 
+            Ref: PublicSubnet     
+      UserData:
+        Fn::Base64: 
+          !Sub |
+            #!/bin/bash
+            yum update -y
+            yum -y install httpd
+            systemctl enable httpd
+            systemctl start httpd.service
+
+  PublicSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: PublicSubnet
+      RouteTableId:
+        Ref: PublicRouteTable
+
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: SecurityGroup
+      VpcId: 
+        Ref: VPC001
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: 
+            Ref: SGTagKey
+          Value: 
+            Ref: SGTagValue 
