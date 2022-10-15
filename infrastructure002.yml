@@ -1,0 +1,218 @@
+Description: A Simple Template
+
+Parameters:
+  VpcCidr:
+    Type: String
+    Default: 172.31.0.0/16
+
+  PublicSubnetCidr:
+    Type: String
+    Default: 172.31.1.0/24
+
+  SubnetAZ:
+    Type: String
+    Default: us-west-2a
+
+  OtherSubnetAZ:
+    Type: String
+    Default: us-west-2b
+  
+  PrivateSubnet1Cidr:
+    Type: String
+    Default: 172.31.2.0/24
+
+  PrivateSubnet2Cidr:
+    Type: String
+    Default: 172.31.3.0/24
+
+  EC2InstanceType:
+    Type: String
+    Default: t2.micro
+
+  RDSInstanceClass:
+    Type: String
+    Default: db.t2.micro
+
+  RDSStorage:
+    Type: Integer
+    Default: 20
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsHostnames: True
+      EnableDnsSupport: True
+      Tags:
+        - Key: newvpckey
+          Value: newvpcvalue
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: !Ref PublicSubnetCidr
+      VpcId: 
+        Ref: VPC
+      AvailabilityZone: !Ref SubnetAZ
+      MapPublicIpOnLaunch: True
+      Tags:
+        - Key: publicsubnetkey
+          Value: publicsubnetvalue    
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties: 
+      CidrBlock: !Ref PrivateSubnet1Cidr
+      VpcId: 
+        Ref: VPC
+      AvailabilityZone: !Ref SubnetAZ
+      MapPublicIpOnLaunch: False
+      Tags:
+        - Key: privatesubnetkey
+          Value: privatesubnetvalue
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties: 
+      CidrBlock: !Ref PrivateSubnet2Cidr
+      VpcId: 
+        Ref: VPC
+      AvailabilityZone: !Ref OtherSubnetAZ
+      MapPublicIpOnLaunch: False
+      Tags:
+        - Key: privatesubnetkey
+          Value: privatesubnetvalue
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: IGkey
+          Value: IGvalue
+
+  GatewayToInternet:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: 
+        Ref: VPC
+      InternetGatewayId:
+        Ref: InternetGateway
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: Public
+
+  PublicRoute1:
+    Type: AWS::EC2::Route
+    DependsOn: GatewayToInternet
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  
+  WpEC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-08e2d37b6a0129927
+      InstanceType: !Ref EC2InstanceType
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: True
+          DeviceIndex: 0
+          GroupSet:
+            - Ref: PublicSecurityGroup
+          SubnetId: 
+            Ref: PublicSubnet
+          PrivateIpAddress: 172.31.1.74
+      UserData:
+        Fn::Base64: 
+          !Sub |
+            #!/bin/bash
+            sudo yum update -y
+            sudo amazon-linux-extras install -y lamp-mariadb10.2-php7.2 php7.2
+            sudo yum install -y httpd php-gd
+            wget https://wordpress.org/latest.tar.gz
+            tar -xzf latest.tar.gz
+            cp wordpress/wp-config-sample.php wordpress/wp-config.php
+            sed -i 's/database_name_here/wordpressdb/g' wordpress/wp-config.php
+            sed -i 's/username_here/wpuser/g' wordpress/wp-config.php
+            sed -i 's/password_here/password123/g' wordpress/wp-config.php
+            sed -i 's/localhost/${DatabaseEC2Instance.Endpoint.Address}/g' wordpress/wp-config.php
+            sudo cp -r wordpress/* /var/www/html/
+            sudo chown -R apache /var/www
+            sudo chgrp -R apache /var/www
+            sudo chmod 2775 /var/www
+            sudo sed -i  '151s/.*/AllowOverride All/' httpd.conf
+            sudo systemctl start httpd
+            sudo systemctl enable httpd
+
+  PublicSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: SecurityGroup
+      VpcId: 
+        Ref: VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: SName
+          Value: SecurityGroup
+
+
+  DatabaseEC2Instance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: newDbInstance
+      DBName: wordpressdb
+      DBInstanceClass: !Ref RDSInstanceClass
+      AllocatedStorage: !Ref RDSStorage
+      Engine: MySQL
+      EngineVersion: "8.0.28"
+      MasterUsername: wpuser
+      MasterUserPassword: password123
+      VPCSecurityGroups:
+        - Ref: PrivateSecurityGroup
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      
+  DBSubnetGroup:
+    Type: 'AWS::RDS::DBSubnetGroup'
+    Properties:
+      DBSubnetGroupDescription: !Ref 'AWS::StackName'
+      SubnetIds:
+        - Ref: PrivateSubnet1
+        - Ref: PrivateSubnet2
+             
+
+  PrivateSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: SecurityGroup
+      VpcId: 
+        Ref: VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId:
+            Ref: PublicSecurityGroup
+      Tags:
+        - Key: SName
+          Value: SecurityGroup
